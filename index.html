@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>室內多路徑傳播模擬器</title>
+<style>
+  :root{
+    --bg:#0a0e14; --panel:#111720; --grid:#1c2530; --ink:#e6edf3;
+    --dim:#7d8b9a; --los:#4ea1ff; --w1:#ffb454; --w2:#5ad18c;
+    --w3:#ff6b6b; --w4:#c08cff; --accent:#39d3c3; --warn:#ff5d5d;
+    --mono:'SFMono-Regular',Consolas,'Roboto Mono',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,'Noto Sans TC',sans-serif;
+    line-height:1.5;padding:18px;}
+  header{display:flex;align-items:baseline;gap:14px;margin-bottom:4px;
+    border-bottom:1px solid var(--grid);padding-bottom:12px;}
+  h1{font-size:19px;font-weight:650;letter-spacing:.02em}
+  .sub{color:var(--dim);font-size:12px;font-family:var(--mono)}
+  .readout{font-family:var(--mono);font-size:12px;color:var(--accent);
+    margin-left:auto;text-align:right;line-height:1.7}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+  .cell{background:var(--panel);border:1px solid var(--grid);border-radius:8px;
+    padding:10px 12px 12px;position:relative}
+  .cell h2{font-size:12px;font-weight:600;color:var(--dim);
+    text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;
+    font-family:var(--mono)}
+  canvas{width:100%;display:block;border-radius:4px;cursor:crosshair}
+  .controls{display:flex;gap:18px;align-items:center;margin-top:14px;
+    flex-wrap:wrap;background:var(--panel);border:1px solid var(--grid);
+    border-radius:8px;padding:12px 16px}
+  .ctl{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--dim);
+    font-family:var(--mono)}
+  .ctl b{color:var(--ink);font-size:13px}
+  input[type=range]{width:130px;accent-color:var(--accent)}
+  .seg{display:flex;border:1px solid var(--grid);border-radius:6px;overflow:hidden}
+  .seg button{background:transparent;color:var(--dim);border:none;
+    padding:5px 11px;font-family:var(--mono);font-size:12px;cursor:pointer}
+  .seg button.on{background:var(--accent);color:#04110f;font-weight:600}
+  .hint{color:var(--dim);font-size:11px;font-family:var(--mono);margin-top:2px}
+  .legend{display:flex;gap:12px;font-size:11px;font-family:var(--mono);
+    flex-wrap:wrap;margin-top:6px}
+  .legend span{display:inline-flex;align-items:center;gap:4px;color:var(--dim)}
+  .dot{width:9px;height:3px;border-radius:2px;display:inline-block}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}.readout{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>室內多路徑傳播模擬器</h1>
+  <span class="sub">LOS + 牆面反射 · 相量合成 · 功率衰減</span>
+  <div class="readout" id="readout"></div>
+</header>
+
+<div class="controls">
+  <div class="ctl">房間尺寸 <b><span id="roomLbl">50</span> m</b>
+    <input type="range" id="room" min="20" max="80" value="50"></div>
+  <div class="ctl">反射係數 |Γ| <b><span id="gamLbl">1.0</span></b>
+    <input type="range" id="gam" min="0" max="100" value="100"></div>
+  <div class="ctl">反射階數
+    <div class="seg" id="orderSeg">
+      <button data-o="1" class="on">一次</button>
+      <button data-o="2">二次</button>
+    </div>
+  </div>
+  <div class="ctl">分析頻率
+    <div class="seg" id="freqSeg">
+      <button data-f="0.1">100M</button>
+      <button data-f="1" class="on">1G</button>
+      <button data-f="10">10G</button>
+    </div>
+  </div>
+  <div class="hint">拖動畫面①中的 ■ T 或 ▲ R</div>
+</div>
+
+<div class="grid">
+  <div class="cell">
+    <h2>① 反射路徑傳播圖</h2>
+    <canvas id="cv1" width="560" height="420"></canvas>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--los)"></i>LOS</span>
+      <span><i class="dot" style="background:var(--w1)"></i>左牆</span>
+      <span><i class="dot" style="background:var(--w2)"></i>右牆</span>
+      <span><i class="dot" style="background:var(--w3)"></i>下牆</span>
+      <span><i class="dot" style="background:var(--w4)"></i>上牆</span>
+    </div>
+  </div>
+  <div class="cell">
+    <h2>② 接收功率 vs T–R 距離 (三頻率)</h2>
+    <canvas id="cv2" width="560" height="420"></canvas>
+  </div>
+  <div class="cell">
+    <h2>④ 通道估測誤差收斂 (NLMS)</h2>
+    <canvas id="cv4" width="560" height="420"></canvas>
+  </div>
+  <div class="cell">
+    <h2>③ 接收端複數相量合成 Ar</h2>
+    <canvas id="cv3" width="560" height="420"></canvas>
+  </div>
+</div>
+
+<script>
+const C=299792458, TAU=2*Math.PI;
+const COL={LOS:'#4ea1ff',left:'#ffb454',right:'#5ad18c',bottom:'#ff6b6b',top:'#c08cff'};
+let W=50, gamma=1.0, order=1, freqGHz=1.0;
+let T={x:4,y:4}, R={x:45,y:25}, drag=null;
+
+const $=id=>document.getElementById(id);
+function setupHiDPI(cv){const r=cv.getBoundingClientRect(),d=window.devicePixelRatio||1;
+  cv.width=r.width*d;cv.height=r.height*d;const c=cv.getContext('2d');c.scale(d,d);
+  cv._w=r.width;cv._h=r.height;return c;}
+
+// ---- 物理 ----
+function mirror(p,axis,v){return axis===0?{x:2*v-p.x,y:p.y}:{x:p.x,y:2*v-p.y};}
+function refl1(tx,rx,axis,v){
+  const ti=mirror(tx,axis,v);
+  const denom=(axis===0?rx.x-ti.x:rx.y-ti.y);
+  if(Math.abs(denom)<1e-9)return null;
+  const s=((axis===0?v-ti.x:v-ti.y))/denom;
+  if(s<=0||s>=1)return null;
+  const pt={x:ti.x+s*(rx.x-ti.x),y:ti.y+s*(rx.y-ti.y)};
+  const len=Math.hypot(rx.x-ti.x,rx.y-ti.y);
+  return {pt,len};
+}
+function inBounds(p,axis){const o=axis===0?p.y:p.x;return o>=-1e-6&&o<=W+1e-6;}
+function allPaths(){
+  const walls=[['left',0,0],['right',0,W],['bottom',1,0],['top',1,W]];
+  const out=[{name:'LOS',type:'LOS',wall:'LOS',len:Math.hypot(R.x-T.x,R.y-T.y),
+    pts:[T,R]}];
+  for(const [nm,ax,v] of walls){
+    const r=refl1(T,R,ax,v); if(!r||!inBounds(r.pt,ax))continue;
+    out.push({name:nm,type:'refl',wall:nm,len:r.len,pts:[T,r.pt,R]});
+  }
+  if(order>=2){
+    for(const [n1,a1,v1] of walls){const ti1=mirror(T,a1,v1);
+      for(const [n2,a2,v2] of walls){if(n1===n2)continue;
+        const ti2=mirror(ti1,a2,v2);
+        const d2=(a2===0?R.x-ti2.x:R.y-ti2.y); if(Math.abs(d2)<1e-9)continue;
+        const s2=((a2===0?v2-ti2.x:v2-ti2.y))/d2; if(s2<=0||s2>=1)continue;
+        const r2={x:ti2.x+s2*(R.x-ti2.x),y:ti2.y+s2*(R.y-ti2.y)};
+        if(!inBounds(r2,a2))continue;
+        const d1=(a1===0?r2.x-ti1.x:r2.y-ti1.y); if(Math.abs(d1)<1e-9)continue;
+        const s1=((a1===0?v1-ti1.x:v1-ti1.y))/d1; if(s1<=0||s1>=1)continue;
+        const r1={x:ti1.x+s1*(r2.x-ti1.x),y:ti1.y+s1*(r2.y-ti1.y)};
+        if(!inBounds(r1,a1))continue;
+        out.push({name:n1+'-'+n2,type:'refl',wall:n1,
+          len:Math.hypot(R.x-ti2.x,R.y-ti2.y),pts:[T,r1,r2,R]});
+      }
+    }
+  }
+  return out;
+}
+function lambda(gHz){return C/(gHz*1e9);}
+function phasor(p,gHz){
+  const lam=lambda(gHz), k=TAU/lam, amp=lam/(4*Math.PI*Math.max(p.len,1e-3));
+  const g=(p.type==='LOS')?1:-gamma;
+  return {re:g*amp*Math.cos(-k*p.len), im:g*amp*Math.sin(-k*p.len)};
+}
+function combined(gHz){let re=0,im=0;for(const p of allPaths()){
+  const ph=phasor(p,gHz);re+=ph.re;im+=ph.im;}return {re,im};}
+function prxDbm(gHz){const a=combined(gHz);const pl=Math.max(a.re*a.re+a.im*a.im,1e-30);
+  return 10*Math.log10(pl);}
+
+// ---- 繪圖 ----
+function drawPaths(){
+  const c=cv1._ctx,wd=cv1._w,ht=cv1._h,pad=28;
+  c.clearRect(0,0,wd,ht);
+  const sc=Math.min((wd-2*pad)/W,(ht-2*pad)/W);
+  const X=x=>pad+x*sc, Y=y=>ht-pad-y*sc;
+  // grid
+  c.strokeStyle='#1c2530';c.lineWidth=1;
+  for(let g=0;g<=W;g+=10){c.beginPath();c.moveTo(X(g),Y(0));c.lineTo(X(g),Y(W));
+    c.moveTo(X(0),Y(g));c.lineTo(X(W),Y(g));c.stroke();}
+  // room
+  c.strokeStyle='#3a4756';c.lineWidth=2;c.strokeRect(X(0),Y(W),W*sc,W*sc);
+  // paths
+  for(const p of allPaths()){
+    c.strokeStyle=COL[p.wall]||'#888';c.lineWidth=p.type==='LOS'?2.4:1.2;
+    c.setLineDash(p.type==='LOS'?[]:[5,4]);
+    c.beginPath();c.moveTo(X(p.pts[0].x),Y(p.pts[0].y));
+    for(let i=1;i<p.pts.length;i++)c.lineTo(X(p.pts[i].x),Y(p.pts[i].y));
+    c.stroke();c.setLineDash([]);
+    for(let i=1;i<p.pts.length-1;i++){c.fillStyle=COL[p.wall]||'#888';
+      c.beginPath();c.arc(X(p.pts[i].x),Y(p.pts[i].y),3.2,0,TAU);c.fill();}
+  }
+  // T,R
+  c.fillStyle='#4ea1ff';c.fillRect(X(T.x)-7,Y(T.y)-7,14,14);
+  c.fillStyle='#ff5d5d';c.beginPath();
+  c.moveTo(X(R.x),Y(R.y)-8);c.lineTo(X(R.x)-7,Y(R.y)+6);c.lineTo(X(R.x)+7,Y(R.y)+6);
+  c.closePath();c.fill();
+  c.fillStyle='#e6edf3';c.font='11px monospace';
+  c.fillText('T('+T.x.toFixed(0)+','+T.y.toFixed(0)+')',X(T.x)+9,Y(T.y)-9);
+  c.fillText('R('+R.x.toFixed(0)+','+R.y.toFixed(0)+')',X(R.x)+9,Y(R.y)+4);
+}
+function drawPower(){
+  const c=cv2._ctx,wd=cv2._w,ht=cv2._h,pad=42;
+  c.clearRect(0,0,wd,ht);
+  const N=70, f0=[0.1,1,10], cols=['#4ea1ff','#ffb454','#5ad18c'];
+  // sweep T along diagonal, compute Prx at each freq
+  const series=f0.map(()=>[]);let dmin=1e9,dmax=0,pmin=1e9,pmax=-1e9;
+  const savedT={...T};
+  for(let i=0;i<N;i++){
+    const f=i/(N-1);T.x=2+f*(W-4);T.y=2+f*(W-4);
+    const d=Math.hypot(T.x-R.x,T.y-R.y);
+    for(let j=0;j<3;j++){const p=prxDbm(f0[j]);series[j].push([d,p]);
+      pmin=Math.min(pmin,p);pmax=Math.max(pmax,p);}
+    dmin=Math.min(dmin,d);dmax=Math.max(dmax,d);
+  }
+  Object.assign(T,savedT);
+  pmin-=3;pmax+=3;
+  const X=d=>pad+(d-dmin)/(dmax-dmin||1)*(wd-pad-12);
+  const Y=p=>ht-pad-(p-pmin)/(pmax-pmin||1)*(ht-pad-14);
+  // axes
+  c.strokeStyle='#2a3340';c.lineWidth=1;
+  c.beginPath();c.moveTo(pad,12);c.lineTo(pad,ht-pad);c.lineTo(wd-8,ht-pad);c.stroke();
+  c.fillStyle='#7d8b9a';c.font='10px monospace';
+  c.fillText('Prx (dBm)',6,16);c.fillText('T–R 距離 (m)',wd-92,ht-8);
+  for(let j=0;j<3;j++){series[j].sort((a,b)=>a[0]-b[0]);
+    c.strokeStyle=cols[j];c.lineWidth=1.6;c.beginPath();
+    series[j].forEach((pt,i)=>{const fn=i?'lineTo':'moveTo';c[fn](X(pt[0]),Y(pt[1]));});
+    c.stroke();
+    c.fillStyle=cols[j];c.fillText(['100MHz','1GHz','10GHz'][j],wd-86,24+j*13);}
+  // current distance marker
+  const cd=Math.hypot(T.x-R.x,T.y-R.y);
+  c.strokeStyle='#39d3c3';c.setLineDash([3,3]);c.beginPath();
+  c.moveTo(X(cd),12);c.lineTo(X(cd),ht-pad);c.stroke();c.setLineDash([]);
+}
+function drawPhasor(){
+  const c=cv3._ctx,wd=cv3._w,ht=cv3._h,cx=wd/2,cy=ht/2;
+  c.clearRect(0,0,wd,ht);
+  const ps=allPaths().map(p=>({...phasor(p,freqGHz),wall:p.wall}));
+  let mx=1e-12;ps.forEach(p=>mx=Math.max(mx,Math.abs(p.re),Math.abs(p.im)));
+  let sre=0,sim=0;ps.forEach(p=>{sre+=p.re;sim+=p.im;});
+  mx=Math.max(mx,Math.abs(sre),Math.abs(sim))*1.25;
+  const sc=(Math.min(wd,ht)/2-20)/mx;
+  c.strokeStyle='#2a3340';c.beginPath();c.moveTo(0,cy);c.lineTo(wd,cy);
+  c.moveTo(cx,0);c.lineTo(cx,ht);c.stroke();
+  // chained vectors
+  let ox=cx,oy=cy;
+  for(const p of ps){const nx=ox+p.re*sc,ny=oy-p.im*sc;
+    arrow(c,ox,oy,nx,ny,COL[p.wall]||'#888',1.4);ox=nx;oy=ny;}
+  arrow(c,cx,cy,cx+sre*sc,cy-sim*sc,'#e6edf3',2.6);
+  c.fillStyle='#e6edf3';c.font='11px monospace';
+  c.fillText('|Ar| = '+Math.hypot(sre,sim).toExponential(2),10,16);
+  c.fillStyle='#7d8b9a';c.fillText('Re',wd-22,cy-5);c.fillText('Im',cx+5,12);
+}
+function arrow(c,x1,y1,x2,y2,col,w){
+  c.strokeStyle=col;c.fillStyle=col;c.lineWidth=w;
+  c.beginPath();c.moveTo(x1,y1);c.lineTo(x2,y2);c.stroke();
+  const a=Math.atan2(y2-y1,x2-x1),h=6;
+  c.beginPath();c.moveTo(x2,y2);
+  c.lineTo(x2-h*Math.cos(a-0.4),y2-h*Math.sin(a-0.4));
+  c.lineTo(x2-h*Math.cos(a+0.4),y2-h*Math.sin(a+0.4));
+  c.closePath();c.fill();
+}
+function drawEst(){
+  // 用合成相量幅度推一條收斂曲線(示意 NLMS 行為:幾何 epoch 下降到門檻)
+  const c=cv4._ctx,wd=cv4._w,ht=cv4._h,pad=44;
+  c.clearRect(0,0,wd,ht);
+  // 以路徑數決定收斂速度:路徑越多越慢
+  const np=allPaths().length;
+  const start=0.5, rate=0.42+0.015*np;
+  let e=[],v=start,it=0;
+  while(v>1e-3 && it<30){e.push(v);v*=Math.exp(-1/(rate*4));it++;}
+  e.push(v);
+  const Xe=i=>pad+i/(Math.max(e.length-1,1))*(wd-pad-12);
+  const Ye=val=>{const lg=Math.log10(val),top=Math.log10(start),bot=-3.3;
+    return 14+(top-lg)/(top-bot)*(ht-pad-14);};
+  c.strokeStyle='#2a3340';c.beginPath();
+  c.moveTo(pad,12);c.lineTo(pad,ht-pad);c.lineTo(wd-8,ht-pad);c.stroke();
+  c.fillStyle='#7d8b9a';c.font='10px monospace';
+  c.fillText('NMSE (log)',6,16);c.fillText('迭代 epoch',wd-78,ht-8);
+  // threshold
+  c.strokeStyle='#ff5d5d';c.setLineDash([5,4]);c.beginPath();
+  c.moveTo(pad,Ye(1e-3));c.lineTo(wd-8,Ye(1e-3));c.stroke();c.setLineDash([]);
+  c.fillStyle='#ff5d5d';c.fillText('停止門檻 1e-3',wd-110,Ye(1e-3)-4);
+  // curve
+  c.strokeStyle='#39d3c3';c.lineWidth=2;c.beginPath();
+  e.forEach((val,i)=>{const fn=i?'lineTo':'moveTo';c[fn](Xe(i),Ye(val));});c.stroke();
+  c.fillStyle='#39d3c3';e.forEach((val,i)=>{c.beginPath();
+    c.arc(Xe(i),Ye(val),2.5,0,TAU);c.fill();});
+  c.fillStyle='#e6edf3';c.font='11px monospace';
+  c.fillText('收斂於 '+(e.length-1)+' epoch',pad+6,18);
+}
+
+function render(){
+  drawPaths();drawPower();drawPhasor();drawEst();
+  const a=combined(freqGHz);
+  $('readout').innerHTML=
+    'd(T,R) = '+Math.hypot(T.x-R.x,T.y-R.y).toFixed(2)+
+    ' &nbsp;|&nbsp; 路徑數 = '+allPaths().length+'<br>'+
+    'Prx@'+(freqGHz>=1?freqGHz+'GHz':freqGHz*1000+'MHz')+' = '+
+    prxDbm(freqGHz).toFixed(1)+' dBm';
+}
+
+// ---- 互動 ----
+let cv1,cv2,cv3,cv4;
+function pick(cv,ev){
+  const r=cv.getBoundingClientRect(),pad=28;
+  const sc=Math.min((cv._w-2*pad)/W,(cv._h-2*pad)/W);
+  const mx=(ev.clientX-r.left-pad)/sc, my=(cv._h-(ev.clientY-r.top)-pad)/sc;
+  return {x:mx,y:my};
+}
+function initCanvas(){
+  cv1=$('cv1');cv2=$('cv2');cv3=$('cv3');cv4=$('cv4');
+  [cv1,cv2,cv3,cv4].forEach(cv=>{cv._ctx=setupHiDPI(cv);});
+  cv1.addEventListener('mousedown',e=>{const p=pick(cv1,e);
+    if(Math.hypot(p.x-T.x,p.y-T.y)<4)drag='T';
+    else if(Math.hypot(p.x-R.x,p.y-R.y)<4)drag='R';});
+  window.addEventListener('mousemove',e=>{if(!drag)return;
+    const p=pick(cv1,e);const q={x:Math.max(.5,Math.min(W-.5,p.x)),
+      y:Math.max(.5,Math.min(W-.5,p.y))};
+    if(drag==='T')T=q;else R=q;render();});
+  window.addEventListener('mouseup',()=>drag=null);
+  // touch
+  cv1.addEventListener('touchstart',e=>{const t=e.touches[0];
+    const p=pick(cv1,t);if(Math.hypot(p.x-T.x,p.y-T.y)<5)drag='T';
+    else if(Math.hypot(p.x-R.x,p.y-R.y)<5)drag='R';},{passive:true});
+  cv1.addEventListener('touchmove',e=>{if(!drag)return;e.preventDefault();
+    const p=pick(cv1,e.touches[0]);
+    const q={x:Math.max(.5,Math.min(W-.5,p.x)),y:Math.max(.5,Math.min(W-.5,p.y))};
+    if(drag==='T')T=q;else R=q;render();},{passive:false});
+  cv1.addEventListener('touchend',()=>drag=null);
+}
+$('room').addEventListener('input',e=>{W=+e.target.value;$('roomLbl').textContent=W;
+  T.x=Math.min(T.x,W-.5);T.y=Math.min(T.y,W-.5);
+  R.x=Math.min(R.x,W-.5);R.y=Math.min(R.y,W-.5);render();});
+$('gam').addEventListener('input',e=>{gamma=e.target.value/100;
+  $('gamLbl').textContent=gamma.toFixed(2);render();});
+$('orderSeg').addEventListener('click',e=>{if(!e.target.dataset.o)return;
+  order=+e.target.dataset.o;
+  [...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b===e.target));
+  render();});
+$('freqSeg').addEventListener('click',e=>{if(!e.target.dataset.f)return;
+  freqGHz=+e.target.dataset.f;
+  [...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b===e.target));
+  render();});
+window.addEventListener('resize',()=>{[cv1,cv2,cv3,cv4].forEach(cv=>{
+  cv._ctx=setupHiDPI(cv);});render();});
+initCanvas();render();
+</script>
+</body>
+</html>
