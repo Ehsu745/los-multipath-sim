@@ -11,7 +11,7 @@ model. Includes two extensions: **second-order reflections** and a
 Three interfaces are provided: a pure-Python CLI, an interactive matplotlib GUI,
 and a zero-install **browser demo**.
 
-![Main view](assets/main_view.png)
+![Main view](assets/main_view_en.png)
 
 ---
 
