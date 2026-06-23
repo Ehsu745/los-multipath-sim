@@ -69,10 +69,10 @@ drag T / R to update in real time.
 ## Extensions
 
 ### ② Second-Order Reflections
-![Second-order reflections](assets/ext_second_order.png)
+![Second-order reflections](assets/ext_second_order_en.png)
 
 ### ③ Time-Varying Channel → Doppler → OFDM ICI
-![ICI analysis](assets/ext_ici.png)
+![ICI analysis](assets/ext_ici_en.png)
 
 ---
 
