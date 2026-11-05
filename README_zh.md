@@ -66,6 +66,24 @@ python run.py snapshot --out main.png                   # 無頭環境輸出快�
 
 ---
 
+## 量測方法學
+
+路徑損耗與頻率衰減以**回歸斜率 + 殘差**及**多組 T/R 隨機組態的 ensemble 統計**
+呈現,而非單點斜率——單一組態會落在深衰落谷,不具代表性。
+
+![方法學修正](assets/methodology.png)
+
+- **頻率掃描:** LOS 回歸得精確 −20.0 dB/decade (Friis);全多路徑 −21.2 dB/decade,
+  趨勢上下約 4 dB shadowing 散布。
+- **Ensemble 路徑損耗指數:** 理想反射係數 (Γ=−1) 得非物理的 n=1.6 (無損牆灌入能量);
+  改用依入射角的 **Fresnel** 係數 (混凝土 εr=4.44) 後 n 回升至 ~2.0,散布也收斂。
+- **適用性:** 幾何光學 + 平滑牆面 Fresnel 適用於牆面粗糙度 ≪ λ;10 GHz (λ=3 cm) 下
+  粗糙度、穿透、繞射不可忽略,該頻段結果僅供趨勢參考。
+
+詳見 [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md),執行 `python run.py measure`。
+
+---
+
 ## 專案結構
 
 ```
@@ -77,14 +95,16 @@ los-multipath-sim/
 │   ├── estimation.py      # NLMS 通道估測
 │   ├── packet.py          # WSN 封包能量模型
 │   ├── timevarying.py     # 都卜勒、時變通道、OFDM ICI
+│   ├── measurement.py     # 回歸/ensemble 路徑損耗 + Fresnel
 │   └── gui.py             # matplotlib 互動四象限 GUI
 ├── web/index.html         # 零安裝瀏覽器互動版
 ├── examples/              # 圖表生成腳本
 ├── docs/THEORY.md         # 完整物理推導
+├── docs/METHODOLOGY.md    # 量測方法學修正
 └── assets/                # 展示圖
 ```
 
-詳細公式見 [`docs/THEORY.md`](docs/THEORY.md)。
+詳細公式見 [`docs/THEORY.md`](docs/THEORY.md);量測修正見 [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)。
 
 ---
 

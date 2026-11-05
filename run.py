@@ -73,6 +73,22 @@ def cmd_doppler(a):
     print(f"max |f_d|={mx:.1f} Hz, f_d/Δf(15kHz)={mx/15e3:.4f}")
 
 
+def cmd_measure(a):
+    from geometry import Room
+    from measurement import (freq_sweep_regression, distance_sweep_regression,
+                             ensemble_path_loss, ensemble_path_loss_fresnel)
+    room = Room(a.room, a.room)
+    rl = freq_sweep_regression(room, a.tx, a.rx, los_only=True)
+    rm = freq_sweep_regression(room, a.tx, a.rx, los_only=False)
+    print(f"freq slope  LOS={rl['slope_db_per_decade']:.2f}  "
+          f"multipath={rm['slope_db_per_decade']:.2f} dB/decade "
+          f"(σ={rm['residual_std_db']:.2f} dB)")
+    ri = ensemble_path_loss(room, 1e9, n_configs=300)
+    rf = ensemble_path_loss_fresnel(room, 1e9, n_configs=300)
+    print(f"ensemble n  ideal-Γ={ri['path_loss_exponent']:.2f} (σ={ri['shadowing_std_db']:.1f}dB)"
+          f"  Fresnel={rf['path_loss_exponent']:.2f} (σ={rf['shadowing_std_db']:.1f}dB)")
+
+
 def cmd_gui(a):
     sys.argv = ["gui.py"]
     import gui
@@ -107,6 +123,7 @@ def main():
     sp = sub.add_parser("doppler"); add_common(sp)
     sp.add_argument("--vx", type=float, default=30); sp.add_argument("--vy", type=float, default=0)
     sp.add_argument("--freq", type=float, default=2.4e9); sp.set_defaults(fn=cmd_doppler)
+    sp = sub.add_parser("measure"); add_common(sp); sp.set_defaults(fn=cmd_measure)
     sp = sub.add_parser("gui"); sp.set_defaults(fn=cmd_gui)
     sp = sub.add_parser("snapshot")
     sp.add_argument("--out", default="snapshot.png"); sp.set_defaults(fn=cmd_snapshot)
