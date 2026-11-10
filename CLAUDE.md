@@ -4,6 +4,13 @@
 NLMS 通道估測、WSN 封包能量、Doppler/OFDM-ICI、量測方法學。
 Python CLI + matplotlib GUI + 純 JS 瀏覽器版。
 
+## 上層定位
+
+本專案是 **home-assistant 專案群的 RF 子系統**(室內定位路徑的模型層)。
+整個專案群的總架構、各子系統狀態、跨專案私有脈絡,見 private 的
+**home-assistant 中樞**(`../home-assistant`:ARCHITECTURE / STATUS / PRIVATE_CONTEXT)。
+los 同時是獨立的 portfolio 作品。
+
 ## 這個 repo 的脈絡在哪
 
 進度、模型真相、各模組筆記都在 **worklog vault**（`../worklog`），不要在這裡
